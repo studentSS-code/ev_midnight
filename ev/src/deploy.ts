@@ -1,11 +1,11 @@
 /**
- * Standalone deploy script for the counter contract.
+ * Standalone deploy script for the EV Charging Credit contract.
  *
  * Usage:
  *   npm run build && npm run deploy
  *
  * Prompts for a hex seed (or generates a new one), builds a wallet,
- * waits for sync + funds + dust, deploys the counter contract,
+ * waits for sync + funds + dust, deploys the EV charging contract,
  * and writes deployment.json with the contract address.
  */
 
@@ -19,7 +19,7 @@ import { WebSocket } from 'ws';
 import pino from 'pino';
 import pinoPretty from 'pino-pretty';
 
-import { Contract, ledger as counterLedger } from './managed/counter/contract/index.js';
+import { Contract } from './managed/counter/contract/index.js';
 import { CompiledContract } from '@midnight-ntwrk/compact-js';
 import { deployContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
@@ -59,7 +59,7 @@ const NETWORK_ID = process.env.NETWORK_ID ?? 'undeployed';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 // ZK assets (keys, zkir) live in src/managed, not dist — tsc doesn't copy them
-const zkConfigPath = path.resolve(currentDir, '..', 'src', 'managed', 'counter');
+const zkConfigPath = path.resolve(currentDir, '..', 'src', 'managed', 'ev_charging_credit');
 const deploymentPath = path.resolve(currentDir, '..', 'deployment.json');
 
 // ---------------------------------------------------------------------------
@@ -71,14 +71,16 @@ const logger = pino(
 );
 
 // ---------------------------------------------------------------------------
-// Types
+// Types matching the Compact contract
 // ---------------------------------------------------------------------------
-type CounterPrivateState = { privateCounter: number };
-type CounterCircuits = ImpureCircuitId<Contract<CounterPrivateState>>;
-const CounterPrivateStateId = 'counterPrivateState' as const;
+type EVChargingPrivateState = { 
+  userCredits: bigint  // Uint<64> in Compact maps to bigint in TypeScript
+};
+type EVChargingCircuits = ImpureCircuitId<Contract<EVChargingPrivateState>>;
+const EVChargingPrivateStateId = 'evChargingPrivateState' as const;
 
 // ---------------------------------------------------------------------------
-// Helpers (adapted from counter-cli/src/api.ts)
+// Helpers
 // ---------------------------------------------------------------------------
 const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -137,7 +139,6 @@ async function buildWallet(seed: string) {
     txHistoryStorage: new InMemoryTransactionHistoryStorage(),
   }).startWithPublicKey(PublicKey.fromKeyStore(unshieldedKeystore));
 
-  // DustWallet's DefaultV1Configuration type is narrower than what withDefaults() needs at runtime
   const dustWallet = DustWallet({
     networkId: getNetworkId(),
     costParameters: { additionalFeeOverhead: 300_000_000_000_000n, feeBlocksMargin: 5 },
@@ -153,7 +154,7 @@ async function buildWallet(seed: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Sign transaction intents (workaround from counter-cli)
+// Sign transaction intents
 // ---------------------------------------------------------------------------
 function signTransactionIntents(
   tx: { intents?: Map<number, any> },
@@ -263,7 +264,7 @@ async function main() {
   setNetworkId(NETWORK_ID);
 
   console.log('\n╔══════════════════════════════════════════════════════════╗');
-  console.log('║           Counter Contract Deploy Script                ║');
+  console.log('║      EV Charging Credit Contract Deploy Script          ║');
   console.log(`║           Network: ${NETWORK_ID.padEnd(38)}║`);
   console.log('╚══════════════════════════════════════════════════════════╝\n');
 
@@ -343,11 +344,11 @@ async function main() {
     wallet, shieldedSecretKeys, dustSecretKey, unshieldedKeystore, syncedState,
   );
 
-  const zkConfigProvider = new NodeZkConfigProvider<CounterCircuits>(zkConfigPath);
+  const zkConfigProvider = new NodeZkConfigProvider<EVChargingCircuits>(zkConfigPath);
 
   const providers = {
-    privateStateProvider: levelPrivateStateProvider<typeof CounterPrivateStateId>({
-      privateStateStoreName: 'counter-private-state',
+    privateStateProvider: levelPrivateStateProvider<typeof EVChargingPrivateStateId>({
+      privateStateStoreName: 'ev-charging-private-state',
       signingKeyStoreName: 'signing-keys',
       midnightDbName: 'midnight-level-db',
       walletProvider: walletAndMidnightProvider,
@@ -360,17 +361,17 @@ async function main() {
   };
 
   // --- Compile contract ---
-  const counterCompiledContract = CompiledContract.make('counter', Contract).pipe(
+  const evChargingCompiledContract = CompiledContract.make('counter', Contract).pipe(
     CompiledContract.withVacantWitnesses,
     CompiledContract.withCompiledFileAssets(zkConfigPath),
   );
 
   // --- Deploy ---
-  const contract = await withStatus('Deploying counter contract (this may take a few minutes)', async () => {
+  const contract = await withStatus('Deploying EV Charging Credit contract (this may take a few minutes)', async () => {
     return deployContract(providers, {
-      compiledContract: counterCompiledContract,
-      privateStateId: CounterPrivateStateId,
-      initialPrivateState: { privateCounter: 0 },
+      compiledContract: evChargingCompiledContract,
+      privateStateId: EVChargingPrivateStateId,
+      initialPrivateState: { userCredits: 0n },  // Must be bigint (0n not 0)
     });
   });
 
@@ -382,12 +383,14 @@ async function main() {
     network: NETWORK_ID,
     deployedAt: new Date().toISOString(),
     seed,
+    contractType: 'ev-charging-credit',
+    description: 'Private EV Charging Credit System'
   };
 
   fs.writeFileSync(deploymentPath, JSON.stringify(deployment, null, 2));
 
   console.log(`\n╔══════════════════════════════════════════════════════════╗`);
-  console.log(`║  Contract deployed successfully!                        ║`);
+  console.log(`║  EV Charging Credit Contract deployed successfully!     ║`);
   console.log(`╚══════════════════════════════════════════════════════════╝`);
   console.log(`  Address: ${contractAddress}`);
   console.log(`  Saved:   ${deploymentPath}\n`);
@@ -401,7 +404,6 @@ async function main() {
 
   process.exit(0);
 }
-
 main().catch((err) => {
   logger.error(err, 'Deploy failed');
   process.exit(1);

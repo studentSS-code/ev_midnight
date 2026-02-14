@@ -1,0 +1,65 @@
+// This file is part of example-ev-charging-credit.
+// Copyright (C) 2025 EV Charging Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+pragma language_version >= 0.20;
+import CompactStandardLibrary;
+
+// Private state - each user's charging credits (in kWh)
+export ledger chargingCredits: Coin<Zkp>;
+
+// Public state - total charging sessions completed
+export ledger totalSessions: Counter;
+
+// Add charging credits to a user (e.g., when they purchase a plan)
+export circuit addCredits(amount: Field): [Coin<Zkp>] {
+  return [Coin::<Zkp>(amount)];
+}
+
+// Use charging credits for an EV charging session
+// Input: credit coin representing available credits
+// Output: remaining credits after deducting the charging amount
+export circuit useCredits(
+  creditCoin: Coin<Zkp>,
+  chargeAmount: Field
+): [Coin<Zkp>] {
+  
+  // Verify user has enough credits
+  assert(creditCoin.amount >= chargeAmount);
+  
+  // Deduct the charging amount from available credits
+  let remainingCredits = creditCoin.amount - chargeAmount;
+  
+  // Increment the public session counter
+  totalSessions.increment(1);
+  
+  // Return the remaining credits as a new coin
+  return [Coin::<Zkp>(remainingCredits)];
+}
+
+// Check and transfer credits between users (optional feature)
+export circuit transferCredits(
+  senderCoin: Coin<Zkp>,
+  transferAmount: Field
+): [Coin<Zkp>, Coin<Zkp>] {
+  
+  // Verify sender has enough credits
+  assert(senderCoin.amount >= transferAmount);
+  
+  // Calculate remaining credits for sender
+  let senderRemaining = senderCoin.amount - transferAmount;
+  
+  // Return [sender's remaining credits, recipient's new credits]
+  return [Coin::<Zkp>(senderRemaining), Coin::<Zkp>(transferAmount)];
+}
